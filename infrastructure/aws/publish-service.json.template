@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect": "Allow", "Action": "sts:GetServiceBearerToken", "Resource": "*", "Condition": {"StringEquals": {"sts:AWSServiceName": "codeartifact.amazonaws.com"}}},
+    {"Effect": "Allow", "Action": "codeartifact:GetAuthorizationToken", "Resource": "arn:aws:codeartifact:${AWS_REGION}:${AWS_ACCOUNT_ID}:domain/${CODEARTIFACT_DOMAIN}"},
+    {"Effect": "Allow", "Action": ["codeartifact:GetRepositoryEndpoint", "codeartifact:ReadFromRepository"], "Resource": "arn:aws:codeartifact:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${CODEARTIFACT_DOMAIN}/${CODEARTIFACT_REPOSITORY}"},
+    {"Effect": "Allow", "Action": "codeartifact:DescribePackageVersion", "Resource": "arn:aws:codeartifact:${AWS_REGION}:${AWS_ACCOUNT_ID}:package/${CODEARTIFACT_DOMAIN}/${CODEARTIFACT_REPOSITORY}/maven/org.c3cavite/session-manager-core"},
+    {"Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+    {"Effect": "Allow", "Action": ["ecr:DescribeRepositories", "ecr:DescribeImages", "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${ECR_REPOSITORY}"}
+  ]
+}

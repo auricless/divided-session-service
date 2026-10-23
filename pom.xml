@@ -3,10 +3,14 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
-    <artifactId>session-manager-service</artifactId>
+    <groupId>org.c3cavite</groupId>
+    <artifactId>divided-session-service</artifactId>
+    <version>1.0.0</version>
 
     <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <core.version>1.0.0</core.version>
         <spring-boot.version>4.1.1</spring-boot.version>
         <!-- Patch Boot's managed versions until its BOM includes these security fixes. -->
         <jackson.version>3.1.8</jackson.version>
@@ -18,138 +22,95 @@
 
     <dependencyManagement>
         <dependencies>
-            <dependency>
-                <groupId>org.slf4j</groupId>
-                <artifactId>slf4j-bom</artifactId>
-                <version>${slf4j.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-classic</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-core</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>tools.jackson</groupId>
-                <artifactId>jackson-bom</artifactId>
-                <version>${jackson.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-core</artifactId>
-                <version>${tomcat.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-el</artifactId>
-                <version>${tomcat.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-websocket</artifactId>
-                <version>${tomcat.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-dependencies</artifactId>
-                <version>${spring-boot.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
+            <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-bom</artifactId><version>${slf4j.version}</version><type>pom</type><scope>import</scope></dependency>
+            <dependency><groupId>ch.qos.logback</groupId><artifactId>logback-classic</artifactId><version>${logback.version}</version></dependency>
+            <dependency><groupId>ch.qos.logback</groupId><artifactId>logback-core</artifactId><version>${logback.version}</version></dependency>
+            <dependency><groupId>tools.jackson</groupId><artifactId>jackson-bom</artifactId><version>${jackson.version}</version><type>pom</type><scope>import</scope></dependency>
+            <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-core</artifactId><version>${tomcat.version}</version></dependency>
+            <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-el</artifactId><version>${tomcat.version}</version></dependency>
+            <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-websocket</artifactId><version>${tomcat.version}</version></dependency>
+            <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-dependencies</artifactId><version>${spring-boot.version}</version><type>pom</type><scope>import</scope></dependency>
         </dependencies>
     </dependencyManagement>
 
     <dependencies>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-            <!-- Health only: unused metrics bring unpatched HdrHistogram CVE-2026-14686. -->
+            <groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId>
             <exclusions>
-                <exclusion>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-starter-micrometer-metrics</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.micrometer</groupId>
-                    <artifactId>micrometer-jakarta9</artifactId>
-                </exclusion>
+                <exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-micrometer-metrics</artifactId></exclusion>
+                <exclusion><groupId>io.micrometer</groupId><artifactId>micrometer-jakarta9</artifactId></exclusion>
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
-            <!-- Annotation-only mappings: remove unused XML implementation with CVE-2026-92877. -->
+            <groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId>
             <exclusions>
                 <exclusion><groupId>org.glassfish.jaxb</groupId><artifactId>jaxb-runtime</artifactId></exclusion>
                 <exclusion><groupId>org.glassfish.jaxb</groupId><artifactId>jaxb-core</artifactId></exclusion>
             </exclusions>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-flyway</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-database-postgresql</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>${postgresql.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.c3cavite</groupId>
-            <artifactId>session-manager-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-flyway</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-database-postgresql</artifactId></dependency>
+        <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>${postgresql.version}</version><scope>runtime</scope></dependency>
+        <dependency><groupId>com.h2database</groupId><artifactId>h2</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>org.c3cavite</groupId><artifactId>session-manager-core</artifactId><version>${core.version}</version></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
     </dependencies>
 
     <build>
+        <finalName>app</finalName>
         <plugins>
+            <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.16.0</version></plugin>
+            <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.6.0</version></plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.6.0</version>
+                <groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.15</version>
+                <executions>
+                    <execution><id>prepare-coverage</id><goals><goal>prepare-agent</goal></goals></execution>
+                    <execution><id>coverage-report</id><phase>verify</phase><goals><goal>report</goal></goals></execution>
+                </executions>
             </plugin>
             <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <version>${spring-boot.version}</version>
-                <executions>
-                    <execution><goals><goal>repackage</goal></goals></execution>
-                </executions>
+                <groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><version>${spring-boot.version}</version>
+                <executions><execution><goals><goal>repackage</goal></goals></execution></executions>
             </plugin>
         </plugins>
     </build>
 
-    <parent>
-        <artifactId>divided-session-manager</artifactId>
-        <groupId>org.c3cavite</groupId>
-        <version>1.0-SNAPSHOT</version>
-        <relativePath>../pom.xml</relativePath>
-    </parent>
-    
+    <profiles>
+        <profile>
+            <id>web-app</id>
+            <build><plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-enforcer-plugin</artifactId><version>3.6.2</version>
+                    <executions><execution><id>require-frontend-build</id><phase>validate</phase><goals><goal>enforce</goal></goals>
+                        <configuration><rules><requireFilesExist><files><file>${project.basedir}/frontend/dist/index.html</file></files></requireFilesExist></rules></configuration>
+                    </execution></executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId><version>3.4.0</version>
+                    <executions><execution><id>bundle-react</id><phase>prepare-package</phase><goals><goal>copy-resources</goal></goals>
+                        <configuration><outputDirectory>${project.build.outputDirectory}/static</outputDirectory><resources><resource><directory>${project.basedir}/frontend/dist</directory><filtering>false</filtering></resource></resources></configuration>
+                    </execution></executions>
+                </plugin>
+            </plugins></build>
+        </profile>
+        <profile>
+            <id>quality</id>
+            <build><plugins>
+                <plugin><groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.4</version>
+                    <configuration><java><googleJavaFormat><version>1.36.1</version></googleJavaFormat><removeUnusedImports/></java></configuration>
+                    <executions><execution><id>check-java-format</id><phase>validate</phase><goals><goal>check</goal></goals></execution></executions>
+                </plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-checkstyle-plugin</artifactId><version>3.6.0</version>
+                    <dependencies><dependency><groupId>com.puppycrawl.tools</groupId><artifactId>checkstyle</artifactId><version>14.3.0</version></dependency></dependencies>
+                    <configuration><configLocation>${project.basedir}/config/checkstyle/checkstyle.xml</configLocation><includeTestSourceDirectory>true</includeTestSourceDirectory><consoleOutput>true</consoleOutput><failOnViolation>true</failOnViolation></configuration>
+                    <executions><execution><id>check-java-style</id><phase>validate</phase><goals><goal>check</goal></goals></execution></executions>
+                </plugin>
+                <plugin><groupId>com.github.spotbugs</groupId><artifactId>spotbugs-maven-plugin</artifactId><version>4.10.5.0</version>
+                    <configuration><effort>Max</effort><threshold>Medium</threshold><xmlOutput>true</xmlOutput><failOnError>true</failOnError><excludeFilterFile>${project.basedir}/config/spotbugs/exclude.xml</excludeFilterFile></configuration>
+                    <executions><execution><id>check-java-bugs</id><phase>verify</phase><goals><goal>check</goal></goals></execution></executions>
+                </plugin>
+            </plugins></build>
+        </profile>
+    </profiles>
 </project>

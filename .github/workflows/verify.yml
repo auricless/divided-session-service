@@ -1,0 +1,94 @@
+name: Verify
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CORE_REPOSITORY: auricless/session-manager-core
+      CORE_COMMIT: 2948b992b32ebbe0858c11070e796ac64d07003f
+      POSTGRES_PASSWORD: ci-only-password
+      TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/session_manager
+      TEST_DATABASE_PASSWORD: ci-only-password
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_DB: session_manager
+          POSTGRES_USER: session_manager
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U session_manager -d session_manager"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Require an immutable core revision
+        run: |
+          if ! [[ "$CORE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::Set CORE_COMMIT to the published core repository commit SHA.'
+            exit 1
+          fi
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ env.CORE_REPOSITORY }}
+          ref: ${{ env.CORE_COMMIT }}
+          path: core-checkout
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install the pinned core artifact locally
+        run: mvn --batch-mode --no-transfer-progress -f core-checkout/pom.xml clean install
+      - name: Verify frontend
+        run: |
+          npm --prefix frontend ci --ignore-scripts
+          npm --prefix frontend run check
+          npm --prefix frontend test
+          npm --prefix frontend audit --audit-level=low
+      - name: Install Chromium
+        working-directory: frontend
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Build verified application image
+        env:
+          MAVEN_PROFILES: web-app,quality
+        run: scripts/build-image.sh
+      - name: Start application and PostgreSQL
+        run: docker compose -p divided-session-ci up --detach --wait --wait-timeout 150
+      - name: Browser acceptance
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Full-stack acceptance
+        run: python3 scripts/smoke-container-stack.py --project divided-session-ci
+      - name: Logs on failure
+        if: ${{ failure() }}
+        run: docker compose -p divided-session-ci logs
+      - name: Stop disposable stack
+        if: ${{ always() }}
+        run: docker compose -p divided-session-ci down --volumes

@@ -1,0 +1,108 @@
+name: Publish application image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: service-image-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.ref == 'refs/heads/master' && github.event.repository.default_branch == 'master' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      CODEARTIFACT_DOMAIN: ${{ vars.CODEARTIFACT_DOMAIN }}
+      CODEARTIFACT_DOMAIN_OWNER: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+      CODEARTIFACT_REPOSITORY: ${{ vars.CODEARTIFACT_REPOSITORY }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'divided-session-service' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Require publishing configuration
+        shell: bash
+        run: |
+          for name in AWS_REGION AWS_ROLE_ARN CODEARTIFACT_DOMAIN CODEARTIFACT_DOMAIN_OWNER CODEARTIFACT_REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing $name repository variable."
+              exit 1
+            fi
+          done
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Resolve published core from CodeArtifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws codeartifact describe-package-version --domain "$CODEARTIFACT_DOMAIN" --domain-owner "$CODEARTIFACT_DOMAIN_OWNER" --repository "$CODEARTIFACT_REPOSITORY" --format maven --namespace org.c3cavite --package session-manager-core --package-version 1.0.0 >/dev/null
+          token=$(aws codeartifact get-authorization-token --domain "$CODEARTIFACT_DOMAIN" --domain-owner "$CODEARTIFACT_DOMAIN_OWNER" --duration-seconds 0 --query authorizationToken --output text)
+          if [[ -z "$token" || "$token" == None ]]; then
+            echo '::error::CodeArtifact authorization token is empty.'
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          endpoint=$(aws codeartifact get-repository-endpoint --domain "$CODEARTIFACT_DOMAIN" --domain-owner "$CODEARTIFACT_DOMAIN_OWNER" --repository "$CODEARTIFACT_REPOSITORY" --format maven --query repositoryEndpoint --output text)
+          if [[ "$endpoint" != https://* ]]; then
+            echo '::error::CodeArtifact must return an HTTPS Maven endpoint.'
+            exit 1
+          fi
+          echo "CODEARTIFACT_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "CODEARTIFACT_REPOSITORY_URL=$endpoint" >> "$GITHUB_ENV"
+      - name: Verify and package release application
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci --ignore-scripts
+          npm --prefix frontend run check
+          npm --prefix frontend test
+          npm --prefix frontend audit --audit-level=low
+          npm --prefix frontend run build
+          mvn --batch-mode --no-transfer-progress -s .mvn/codeartifact-settings.xml "-Dmaven.repo.local=$RUNNER_TEMP/release-m2" clean verify -Pweb-app,quality
+          test -s target/app.jar
+          docker build --tag divided-session-service:local .
+      - name: Push immutable ECR tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import xml.etree.ElementTree as ET; print(ET.parse("pom.xml").getroot().find("{http://maven.apache.org/POM/4.0.0}version").text)')
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::POM version must be a semantic release version.'
+            exit 1
+          fi
+          account=$(aws sts get-caller-identity --query Account --output text)
+          registry="$account.dkr.ecr.$AWS_REGION.amazonaws.com"
+          repository="$registry/$ECR_REPOSITORY"
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null
+          for tag in "$version" "sha-${GITHUB_SHA:0:12}"; do
+            if lookup=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$tag" 2>&1); then
+              echo "::error::ECR tag $tag already exists."
+              exit 1
+            elif [[ "$lookup" != *ImageNotFoundException* ]]; then
+              echo "::error::Could not verify whether ECR tag $tag exists."
+              exit 1
+            fi
+          done
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          docker tag divided-session-service:local "$repository:sha-${GITHUB_SHA:0:12}"
+          docker tag divided-session-service:local "$repository:$version"
+          docker push "$repository:sha-${GITHUB_SHA:0:12}"
+          docker push "$repository:$version"
