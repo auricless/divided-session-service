@@ -92,3 +92,11 @@ jobs:
       - name: Stop disposable stack
         if: ${{ always() }}
         run: docker compose -p divided-session-ci down --volumes
+      - name: Preserve failed browser traces
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-failure-${{ github.run_id }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

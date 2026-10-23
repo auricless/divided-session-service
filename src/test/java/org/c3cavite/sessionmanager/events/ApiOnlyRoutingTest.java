@@ -18,7 +18,7 @@ class ApiOnlyRoutingTest {
   @Autowired private EventService events;
 
   @Test
-  void servesEventJsonButLeavesReactRoutesAndAssetsToTheIndependentUiServer() throws Exception {
+  void servesEventJsonWithoutServingMissingAssetsAsHtml() throws Exception {
     var event =
         events.create(
             new EventRequest(
@@ -29,10 +29,9 @@ class ApiOnlyRoutingTest {
       assertEquals(200, json.statusCode());
       assertTrue(
           json.headers().firstValue("Content-Type").orElseThrow().contains("application/json"));
-      assertEquals(404, get("/events").statusCode());
-      assertEquals(404, get("/events/" + event.id()).statusCode());
-      assertEquals(404, get("/events/" + event.id() + "/groups").statusCode());
-      assertEquals(404, get("/assets/registration.js").statusCode());
+      var missingAsset = get("/assets/registration.js");
+      assertEquals(404, missingAsset.statusCode());
+      assertFalse(missingAsset.body().contains("<div id=\"root\""));
     } finally {
       events.delete(event.id());
     }

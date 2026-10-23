@@ -51,3 +51,7 @@ node_modules/
 /frontend/test-results/
 /frontend/playwright-report/
 **/__pycache__/
+
+# Local database and registry credentials
+.env
+.env.*

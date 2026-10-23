@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
+      POSTGRES_PASSWORD: ci-only-release-password
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
       CODEARTIFACT_DOMAIN: ${{ vars.CODEARTIFACT_DOMAIN }}
@@ -79,6 +80,14 @@ jobs:
           mvn --batch-mode --no-transfer-progress -s .mvn/codeartifact-settings.xml "-Dmaven.repo.local=$RUNNER_TEMP/release-m2" clean verify -Pweb-app,quality
           test -s target/app.jar
           docker build --tag divided-session-service:local .
+      - name: Install Chromium for packaged-image verification
+        working-directory: frontend
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Verify the release image against PostgreSQL
+        run: |
+          docker compose -p divided-session-release up --detach --wait --wait-timeout 150
+          npm --prefix frontend run test:e2e
+          python3 scripts/smoke-container-stack.py --project divided-session-release
       - name: Push immutable ECR tags
         shell: bash
         run: |
@@ -106,3 +115,9 @@ jobs:
           docker tag divided-session-service:local "$repository:$version"
           docker push "$repository:sha-${GITHUB_SHA:0:12}"
           docker push "$repository:$version"
+      - name: Release stack logs on failure
+        if: ${{ failure() }}
+        run: docker compose -p divided-session-release logs
+      - name: Stop the disposable release stack
+        if: ${{ always() }}
+        run: docker compose -p divided-session-release down --volumes

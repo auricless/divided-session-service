@@ -110,7 +110,7 @@ MAVEN_SETTINGS=.mvn/codeartifact-settings.xml scripts/build-image.sh
 unset CODEARTIFACT_AUTH_TOKEN
 ```
 
-The release workflow uses a fresh Maven cache and the published core from CodeArtifact. Its CI bootstrap pins the core commit in `verify.yml`; update that pin only to a reviewed core revision. Verify a separate registry consumer before treating core distribution as complete.
+The core release workflow resolves and executes the published library through its independent Maven consumer check after deployment. The service release workflow uses a fresh Maven cache, builds with that published core, and verifies the resulting image through Chromium and HTTP against PostgreSQL. Its CI bootstrap pins the core commit in `verify.yml`; update that pin only to a reviewed core revision. These workflow checks must pass before treating registry distribution as complete.
 
 After a successful ECR release, authenticate and start the pulled image:
 
