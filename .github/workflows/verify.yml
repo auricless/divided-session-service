@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 35
     env:
       CORE_REPOSITORY: auricless/session-manager-core
-      CORE_COMMIT: 2948b992b32ebbe0858c11070e796ac64d07003f
+      CORE_COMMIT: 8faed2e479edf05f353fb50af3532a8130341459
       POSTGRES_PASSWORD: ci-only-password
       TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/session_manager
       TEST_DATABASE_PASSWORD: ci-only-password
