@@ -16,6 +16,9 @@ export CODEARTIFACT_DOMAIN='session-manager'
 export CODEARTIFACT_REPOSITORY='java-releases'
 export ECR_REPOSITORY='divided-session-service'
 export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export GITHUB_OWNER_ID="$(gh api repos/auricless/session-manager-core --jq .owner.id)"
+export CORE_REPOSITORY_ID="$(gh api repos/auricless/session-manager-core --jq .id)"
+export SERVICE_REPOSITORY_ID="$(gh api repos/auricless/divided-session-service --jq .id)"
 ```
 
 Check the account and region before continuing. The following commands create AWS resources; they are setup instructions, not part of local development. Existing resources can be reused. See [CodeArtifact](https://aws.amazon.com/codeartifact/pricing/) and [ECR](https://aws.amazon.com/ecr/pricing/) pricing for your account and region.
@@ -33,7 +36,7 @@ aws ecr create-repository --repository-name "$ECR_REPOSITORY" \
 
 Maven Central remains the source of third-party dependencies; this CodeArtifact repository needs no upstream to host our core. Immutable ECR tags prevent replacing a released image. Choose a new core/service version for a later release.
 
-## 3. Configure GitHub's OIDC provider and two roles
+## 3. Configure GitHub's OIDC provider and three roles
 
 If your account already has the `token.actions.githubusercontent.com` provider with audience `sts.amazonaws.com`, reuse it. Otherwise:
 
@@ -43,7 +46,7 @@ aws iam create-open-id-connect-provider \
   --client-id-list sts.amazonaws.com
 ```
 
-Render the supplied policy templates into temporary files. They grant the core role access to its Maven package, and the service role read access to CodeArtifact plus push access to its ECR repository. Neither role can create infrastructure or delete artifacts.
+Render the supplied policy templates into temporary files. The core publisher can publish its Maven package. The service's separate reader can download only that package's assets, while its image publisher can push only to its ECR repository. These roles cannot create infrastructure or delete artifacts.
 
 ```sh
 export POLICY_DIRECTORY="$(mktemp -d)"
@@ -63,6 +66,11 @@ aws iam create-role --role-name session-manager-core-publisher \
 aws iam put-role-policy --role-name session-manager-core-publisher \
   --policy-name publish-core \
   --policy-document "file://$POLICY_DIRECTORY/publish-core.json"
+aws iam create-role --role-name session-manager-core-reader \
+  --assume-role-policy-document "file://$POLICY_DIRECTORY/trust-service.json"
+aws iam put-role-policy --role-name session-manager-core-reader \
+  --policy-name read-core \
+  --policy-document "file://$POLICY_DIRECTORY/read-core.json"
 aws iam create-role --role-name divided-session-service-publisher \
   --assume-role-policy-document "file://$POLICY_DIRECTORY/trust-service.json"
 aws iam put-role-policy --role-name divided-session-service-publisher \
@@ -70,7 +78,7 @@ aws iam put-role-policy --role-name divided-session-service-publisher \
   --policy-document "file://$POLICY_DIRECTORY/publish-service.json"
 ```
 
-Trust is restricted to each named repository's `master` branch and the STS audience. If you change repository names or the default branch, update both the templates and workflows. These workflows do not use a GitHub deployment environment; adding one changes the OIDC subject and requires a matching trust policy. [AWS's GitHub OIDC guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html) explains this trust relationship.
+Trust is restricted to each repository's immutable owner/repository IDs, `master` branch and STS audience. GitHub's [new-repository subject format](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/) includes those IDs; name-only subjects would reject these repositories. If you change names or the default branch, update the templates and workflows. Adding a GitHub deployment environment also changes the subject and requires a matching trust policy.
 
 ## 4. Configure repository variables
 
@@ -87,6 +95,8 @@ gh variable set AWS_ROLE_ARN --repo auricless/session-manager-core \
   --body "arn:aws:iam::$AWS_ACCOUNT_ID:role/session-manager-core-publisher"
 gh variable set AWS_ROLE_ARN --repo auricless/divided-session-service \
   --body "arn:aws:iam::$AWS_ACCOUNT_ID:role/divided-session-service-publisher"
+gh variable set AWS_CODEARTIFACT_ROLE_ARN --repo auricless/divided-session-service \
+  --body "arn:aws:iam::$AWS_ACCOUNT_ID:role/session-manager-core-reader"
 gh variable set ECR_REPOSITORY --repo auricless/divided-session-service --body "$ECR_REPOSITORY"
 ```
 
@@ -110,7 +120,7 @@ MAVEN_SETTINGS=.mvn/codeartifact-settings.xml scripts/build-image.sh
 unset CODEARTIFACT_AUTH_TOKEN
 ```
 
-The core release workflow resolves and executes the published library through its independent Maven consumer check after deployment. The service release workflow uses a fresh Maven cache, builds with that published core, and verifies the resulting image through Chromium and HTTP against PostgreSQL. Its CI bootstrap pins the core commit in `verify.yml`; update that pin only to a reviewed core revision. These workflow checks must pass before treating registry distribution as complete.
+The core release workflow resolves and executes the published library through its independent Maven consumer after deployment. The service workflow downloads the published JAR/POM using its reader role, builds and verifies the image in a separate job without AWS credentials or OIDC permission, then passes the verified archive to the ECR publisher job. Tests and dependency tools never receive image-publishing credentials. Its CI bootstrap pins the core commit in `verify.yml`; update that pin only to a reviewed core revision.
 
 After a successful ECR release, authenticate and start the pulled image:
 

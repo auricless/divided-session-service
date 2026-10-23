@@ -6,7 +6,7 @@
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {"StringEquals": {
       "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-      "token.actions.githubusercontent.com:sub": "repo:auricless/divided-session-service:ref:refs/heads/master"
+      "token.actions.githubusercontent.com:sub": "repo:auricless@${GITHUB_OWNER_ID}/divided-session-service@${SERVICE_REPOSITORY_ID}:ref:refs/heads/master"
     }}
   }]
 }

@@ -53,6 +53,9 @@ mvn clean verify -Pquality
 npm --prefix frontend ci --ignore-scripts
 npm --prefix frontend run check
 npm --prefix frontend test
+python3 scripts/check-release-policy.py
+python3 scripts/test-oidc-trust.py
+python3 scripts/test-publish-ecr.py
 ```
 
 For the running packaged image, `npm --prefix frontend run test:e2e` exercises the registration, display, print and CSV workflow in Chromium. `python3 scripts/smoke-container-stack.py --project your-disposable-project` checks routes, health, runtime isolation, API behavior and persistence by recreating that test stack. Install Chromium with `node frontend/node_modules/@playwright/test/cli.js install chromium` first. Use a disposable Compose project for the smoke check; it stops and recreates its containers.
@@ -61,7 +64,7 @@ CI builds the real image and runs both checks against PostgreSQL. Until CodeArti
 
 ## Releases
 
-The manual release workflow resolves the core from CodeArtifact using a fresh Maven cache, builds and tests the application image, then publishes version and commit tags to ECR. Running a pulled image does not require AWS credentials. See [one-time AWS setup](docs/aws-setup.md) and [release instructions](docs/aws-release.md). AWS account setup and the first registry releases are still pending.
+The manual release workflow downloads the core from CodeArtifact, installs it in a fresh Maven cache, builds and tests without AWS credentials, then passes the verified image to a separate ECR publisher. Failed publication can resume without replacing existing immutable tags. Running a pulled image does not require AWS credentials. See [one-time AWS setup](docs/aws-setup.md) and [release instructions](docs/aws-release.md). AWS account setup and the first registry releases are still pending.
 
 ## License
 
