@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- These accessors return unmodifiable snapshots. AssignmentResultTest checks both. -->
+    <Match>
+        <Class name="org.c3cavite.core.domain.AssignmentResult"/>
+        <Method name="~getGroups|getBlockers"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+    <!-- The builder is deliberately mutable. SessionConfig copies and validates at build time;
+         SessionConfigTest verifies that later caller mutation cannot alter a built config. -->
+    <Match>
+        <Class name="org.c3cavite.core.domain.SessionConfig$Builder"/>
+        <Method name="~activeTiers|ageTierBoundaries"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+    <!-- A domain permission exception is not a Java Throwable; retain the existing public API. -->
+    <Match>
+        <Class name="org.c3cavite.core.domain.FacilitatorException"/>
+        <Bug pattern="NM_CLASS_NOT_EXCEPTION"/>
+    </Match>
+    <!-- Input-validation constructors for resource-free values: no credentials, handles,
+         privileged operations, or finalizers. Failed validation grants no additional authority.
+         Keep constructor validation and the existing subclassing contract. Reassess this
+         exception if these classes acquire resources or privileged construction invariants. -->
+    <Match>
+        <Or>
+            <Class name="org.c3cavite.core.domain.AssignmentResult"/>
+            <Class name="org.c3cavite.core.domain.Facilitator"/>
+            <Class name="org.c3cavite.core.domain.Participant"/>
+            <Class name="org.c3cavite.core.domain.SessionConfig"/>
+        </Or>
+        <Method name="&lt;init&gt;"/>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+</FindBugsFilter>

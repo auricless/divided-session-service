@@ -1,0 +1,10 @@
+{
+  "config": { "capSize": 6 },
+  "participants": [
+    { "name": "Alex", "age": 18, "gender": "MALE" },
+    { "name": "Jamie", "age": 19, "gender": "MALE" }
+  ],
+  "facilitators": [
+    { "name": "Sam", "role": "LEADER", "gender": "MALE", "qualifiedTiers": ["YOUTH"] }
+  ]
+}

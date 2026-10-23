@@ -1,0 +1,10 @@
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  server: { proxy: { '/api': process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080' } },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.js'],
+    include: ['src/**/*.test.{js,jsx}', 'test/**/*.test.js'],
+  },
+});
