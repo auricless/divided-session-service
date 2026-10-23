@@ -1,0 +1,9 @@
+# Manual image release
+
+The `Publish application image` workflow runs only on the repository's `master` default branch. Configure repository variables `AWS_ROLE_ARN`, `AWS_CODEARTIFACT_ROLE_ARN`, `AWS_REGION`, `CODEARTIFACT_DOMAIN`, `CODEARTIFACT_DOMAIN_OWNER`, and `CODEARTIFACT_REPOSITORY`. `ECR_REPOSITORY` is optional and defaults to `divided-session-service`. Both roles trust the repository's immutable identity and master branch. The CodeArtifact reader can download core assets; the ECR publisher can publish images.
+
+Before dispatching the workflow, publish the immutable `session-manager-core:1.0.0` artifact to CodeArtifact and verify the service's default-branch CI. The release downloads the JAR/POM from CodeArtifact and installs them into a fresh Maven cache; it never checks out core source. A separate build job without AWS credentials or OIDC permission runs frontend/backend checks and verifies the actual image through Chromium and HTTP against PostgreSQL. The publisher job receives only the verified, single-platform image archive and pushes the POM version and `sha-<commit-prefix>` tags. No `latest` tag is produced.
+
+If publication fails after one tag succeeds, rerun the failed publishing job within the archive's three-day retention window. It reuses the same verified image and accepts existing tags only when they match that image; it creates the missing alias without deleting or overwriting tags. Rerunning all build jobs can produce a different image, so it is not the recovery path for an already partially published release.
+
+To deploy, pull a specific ECR tag, set `APP_IMAGE` to its full image URI, and provide `POSTGRES_PASSWORD` for the Compose database (or `DATABASE_URL`, `DATABASE_USER`, and `DATABASE_PASSWORD` when running the image with another PostgreSQL instance). The image does not need AWS credentials to start or serve requests. See [AWS setup](aws-setup.md) for resource and trust configuration.

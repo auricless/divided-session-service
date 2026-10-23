@@ -1,0 +1,193 @@
+name: Publish application image
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: service-image-release
+  cancel-in-progress: false
+
+jobs:
+  fetch-core:
+    if: ${{ github.ref == 'refs/heads/master' && github.event.repository.default_branch == 'master' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_CODEARTIFACT_ROLE_ARN: ${{ vars.AWS_CODEARTIFACT_ROLE_ARN }}
+      CODEARTIFACT_DOMAIN: ${{ vars.CODEARTIFACT_DOMAIN }}
+      CODEARTIFACT_DOMAIN_OWNER: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+      CODEARTIFACT_REPOSITORY: ${{ vars.CODEARTIFACT_REPOSITORY }}
+    steps:
+      - name: Require core download configuration
+        shell: bash
+        run: |
+          for name in AWS_REGION AWS_CODEARTIFACT_ROLE_ARN CODEARTIFACT_DOMAIN CODEARTIFACT_DOMAIN_OWNER CODEARTIFACT_REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing $name repository variable."
+              exit 1
+            fi
+          done
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_CODEARTIFACT_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Download published core JAR and POM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/core-assets"
+          for extension in jar pom; do
+            asset="session-manager-core-1.0.0.$extension"
+            aws codeartifact get-package-version-asset \
+              --domain "$CODEARTIFACT_DOMAIN" \
+              --domain-owner "$CODEARTIFACT_DOMAIN_OWNER" \
+              --repository "$CODEARTIFACT_REPOSITORY" \
+              --format maven \
+              --namespace org.c3cavite \
+              --package session-manager-core \
+              --package-version 1.0.0 \
+              --asset "$asset" \
+              "$RUNNER_TEMP/core-assets/$asset" >/dev/null
+            test -s "$RUNNER_TEMP/core-assets/$asset"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/core-assets/
+          if-no-files-found: error
+          retention-days: 3
+
+  build:
+    needs: fetch-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      POSTGRES_PASSWORD: ci-only-release-password
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/core-assets
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install published core into an isolated Maven cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn --batch-mode --no-transfer-progress \
+            "-Dmaven.repo.local=$RUNNER_TEMP/release-m2" \
+            org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+            "-Dfile=$RUNNER_TEMP/core-assets/session-manager-core-1.0.0.jar" \
+            "-DpomFile=$RUNNER_TEMP/core-assets/session-manager-core-1.0.0.pom"
+      - name: Verify and package release application
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci --ignore-scripts
+          npm --prefix frontend run check
+          npm --prefix frontend test
+          npm --prefix frontend audit --audit-level=low
+          npm --prefix frontend run build
+          mvn --batch-mode --no-transfer-progress \
+            "-Dmaven.repo.local=$RUNNER_TEMP/release-m2" \
+            clean verify -Pweb-app,quality
+          test -s target/app.jar
+          docker build --provenance=false --tag divided-session-service:local .
+      - name: Install Chromium for packaged-image verification
+        working-directory: frontend
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Verify the release image against PostgreSQL
+        run: |
+          docker compose -p divided-session-release up --detach --wait --wait-timeout 150
+          npm --prefix frontend run test:e2e
+          python3 scripts/smoke-container-stack.py --project divided-session-release
+      - name: Archive the verified image
+        run: docker save --output "$RUNNER_TEMP/release-image.tar" divided-session-service:local
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-image.tar
+          if-no-files-found: error
+          retention-days: 3
+      - name: Release stack logs on failure
+        if: ${{ failure() }}
+        run: docker compose -p divided-session-release logs
+      - name: Stop the disposable release stack
+        if: ${{ always() }}
+        run: docker compose -p divided-session-release down --volumes
+      - name: Preserve failed browser traces
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-browser-failure-${{ github.run_id }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'divided-session-service' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: image-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/verified-image
+      - name: Load the verified image and release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker load --input "$RUNNER_TEMP/verified-image/release-image.tar"
+          docker image inspect divided-session-service:local >/dev/null
+          version=$(python3 -c 'import xml.etree.ElementTree as ET; print(ET.parse("pom.xml").getroot().find("{http://maven.apache.org/POM/4.0.0}version").text)')
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::POM version must be a semantic release version.'
+            exit 1
+          fi
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Require publisher configuration
+        shell: bash
+        run: |
+          for name in AWS_REGION AWS_ROLE_ARN ECR_REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing $name repository variable."
+              exit 1
+            fi
+          done
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Push immutable ECR tags
+        run: |
+          python3 scripts/publish-ecr.py \
+            --repository "$ECR_REPOSITORY" \
+            --version "$RELEASE_VERSION" \
+            --commit "$GITHUB_SHA" \
+            --image divided-session-service:local
